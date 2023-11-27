@@ -2,6 +2,7 @@ cache
 tmp
 datasets/*
 logs*
+.vscode*
 # scripts
 .DS_Store
 # Byte-compiled / optimized / DLL files
