@@ -20,7 +20,8 @@ from sat.gnn_layers import GNN_TYPES
 from timeit import default_timer as timer
 
 from ogb.graphproppred import PygGraphPropPredDataset
-from ogb.graphproppred import Evaluator
+from dataset_pyg import PygGraphPropPredDataset
+from evaluate import Evaluator
 
 from torchvision import transforms
 from utils import ASTNodeEncoder, get_vocab_mapping
@@ -33,7 +34,7 @@ def load_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--seed', type=int, default=0,
                         help='random seed')
-    parser.add_argument('--dataset', type=str, default="ogbg-code2",
+    parser.add_argument('--dataset', type=str, default="ogbg-code2-nano",
                         help='name of dataset')
     parser.add_argument('--num-heads', type=int, default=4, help="number of heads")
     parser.add_argument('--num-layers', type=int, default=4, help="number of layers")
@@ -49,7 +50,7 @@ def load_args():
     parser.add_argument('--abs-pe', type=str, default=None, choices=POSENCODINGS.keys(),
                         help='which absolute PE to use?')
     parser.add_argument('--abs-pe-dim', type=int, default=20, help='dimension for absolute PE')
-    parser.add_argument('--outdir', type=str, default='',
+    parser.add_argument('--outdir', type=str, default='./logs',
                         help='output path')
     parser.add_argument('--warmup', type=int, default=2, help="number of epochs for warmup")
     parser.add_argument('--layer-norm', action='store_true', help='use layer norm instead of batch norm')
@@ -67,7 +68,7 @@ def load_args():
 
     parser.add_argument('--max_seq_len', type=int, default=5,
                         help='maximum sequence length to predict')
-    parser.add_argument('--num_vocab', type=int, default=5000,
+    parser.add_argument('--num_vocab', type=int, default=2,
                         help='the number of vocabulary used for sequence prediction')
 
     args = parser.parse_args()
@@ -223,19 +224,19 @@ def main():
     np.random.seed(args.seed)
     print(args)
     data_path = '../datasets'
-    num_edge_features = 2
+    num_edge_features = 2   #13
 
     dataset = PygGraphPropPredDataset(name=args.dataset, root=data_path)
-    seq_len_list = np.array([len(seq) for seq in dataset.data.y])
+    seq_len_list = np.array([len(seq) for seq in dataset.data.y])   #len tokens
     print('Target seqence less or equal to {} is {}%.'.format(
         args.max_seq_len,
         np.sum(seq_len_list <= args.max_seq_len) / len(seq_len_list))
     )
 
-    split_idx = dataset.get_idx_split()
+    split_idx = dataset.get_idx_split() # ogb pyg train/test split
 
 
-    ### building vocabulary for sequence predition. Only use training data.
+    ### building vocabulary for sequence predition. Only use training data.  aka token id
     vocab2idx, idx2vocab = get_vocab_mapping([dataset.data.y[i] for i in split_idx['train']], args.num_vocab)
 
     ### set the transform function
@@ -245,8 +246,8 @@ def main():
         augment_edge, lambda data: encode_y_to_arr(data, vocab2idx, args.max_seq_len)
     ])
 
-    nodetypes_mapping = pd.read_csv(os.path.join(dataset.root, 'mapping', 'typeidx2type.csv.gz'))
-    nodeattributes_mapping = pd.read_csv(os.path.join(dataset.root, 'mapping', 'attridx2attr.csv.gz'))
+    nodetypes_mapping = pd.read_csv(os.path.join(dataset.root, 'mapping', 'typeidx2type.csv'))
+    nodeattributes_mapping = pd.read_csv(os.path.join(dataset.root, 'mapping', 'attridx2attr.csv'))
 
     print(nodeattributes_mapping)
 
@@ -315,7 +316,7 @@ def main():
     print("Total number of parameters: {}".format(count_parameters(model)))
 
     arr_to_seq = lambda arr: decode_arr_to_seq(arr, idx2vocab)
-    evaluator = Evaluator(name=args.dataset)
+    evaluator = Evaluator(name=args.dataset,root=data_path)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

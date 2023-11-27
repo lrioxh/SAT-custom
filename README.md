@@ -98,9 +98,11 @@ python=3.9
 numpy
 scipy
 pytorch=1.9.1
+#pip install torch-geometric
 pytorch-geometric=2.0.2
 einops
 ogb
+conda install pytorch-scatter -c pyg
 ```
 
 Once you have activated the environment and installed all dependencies, run:
@@ -150,7 +152,7 @@ python train_ppa.py --gnn-type gcn --use-edge-attr
 
 ```bash
 # Train SAT on OGBG-CODE2
-python train_code2.py --gnn-type gcn --use-edge-attr
+python experiments/train_code2.py --gnn-type gcn --use-edge-attr --outdir ./logs --batch-size 4
 ```
 
 ## Model visualization
