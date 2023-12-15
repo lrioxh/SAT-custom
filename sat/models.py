@@ -24,7 +24,7 @@ class GraphTransformerEncoder(nn.TransformerEncoder):
                 return_attn=return_attn
             )
         if self.norm is not None:
-            output = self.norm(output)
+            output = self.norm(output)  #layer norm?
         return output
 
 
@@ -96,7 +96,7 @@ class GraphTransformer(nn.Module):
                 self.classifier.append(nn.Linear(d_model, num_class))
 
     def forward(self, data, return_attn=False):
-        x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
+        x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr.float()
 
         node_depth = data.node_depth if hasattr(data, "node_depth") else None
         

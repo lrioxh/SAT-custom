@@ -15,7 +15,7 @@ class ASTNodeEncoder(torch.nn.Module):
         super(ASTNodeEncoder, self).__init__()
 
         self.max_depth = max_depth
-
+        # torch.nn.Embedding：type idx->type emb
         self.type_encoder = torch.nn.Embedding(num_nodetypes, emb_dim)
         self.attribute_encoder = torch.nn.Embedding(num_nodeattributes, emb_dim)
         self.depth_encoder = torch.nn.Embedding(self.max_depth + 1, emb_dim)
@@ -26,6 +26,8 @@ class ASTNodeEncoder(torch.nn.Module):
         return self.type_encoder(x[:,0]) + self.attribute_encoder(x[:,1]) + self.depth_encoder(depth)
 
 
+def one_hot_enc(seq):
+    return torch.nn.functional.one_hot(seq)
 
 def get_vocab_mapping(seq_list, num_vocab):
     '''
@@ -81,6 +83,11 @@ def get_vocab_mapping(seq_list, num_vocab):
 
     return vocab2idx, idx2vocab
 
+def encode_one_hot_y(data,seq2onehot):
+    seq=data.y.squeeze()
+    data.y_enc=torch.tensor(,)
+    return data
+
 def augment_edge(data):
     '''
         Input:
@@ -89,7 +96,7 @@ def augment_edge(data):
             data (edges are augmented in the following ways):
                 data.edge_index: Added next-token edge. The inverse edges were also added.
                 data.edge_attr (torch.Long):
-                    data.edge_attr[:,0]: whether it is AST edge (0) for next-token edge (1)
+                    data.edge_attr[:,0]: whether it is AST edge (0) or next-token edge (1)
                     data.edge_attr[:,1]: whether it is original direction (0) or inverse direction (1)
     '''
 
@@ -173,3 +180,6 @@ def decode_arr_to_seq(arr, idx2vocab):
         clippted_arr = arr
 
     return list(map(lambda x: idx2vocab[x], clippted_arr.cpu()))
+
+if __name__=="__main__":
+    print(one_hot_enc(torch.Tensor(range(3)).to(torch.long)))

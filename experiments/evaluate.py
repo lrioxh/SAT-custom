@@ -14,7 +14,7 @@ class Evaluator:
     def __init__(self, name,root):
         self.name = name
 
-        meta_info = pd.read_csv(os.path.join(root, 'master.csv'), index_col=0, keep_default_na=False)
+        meta_info = pd.read_csv(os.path.join(root, 'datasets.csv'), index_col=0, keep_default_na=False)
         if not self.name in meta_info:
             print(self.name)
             error_mssg = 'Invalid dataset name {}.\n'.format(self.name)

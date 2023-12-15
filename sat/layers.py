@@ -82,6 +82,7 @@ class Attention(gnn.MessagePassing):
             subgraph_indicator_index=None,
             subgraph_edge_attr=None,
             edge_attr=None,
+            edge_dim=None,
             ptr=None,
             return_attn=False):
         """
@@ -115,7 +116,7 @@ class Attention(gnn.MessagePassing):
                 subgraph_edge_attr=subgraph_edge_attr,
             )
         else: # k-subtree SAT
-            x_struct = self.structure_extractor(x, edge_index, edge_attr)
+            x_struct = self.structure_extractor(x, edge_index, edge_attr,edge_dim)
 
 
         # Compute query and key matrices

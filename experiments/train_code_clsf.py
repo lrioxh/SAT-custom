@@ -24,8 +24,8 @@ from dataset_pyg import PygGraphPropPredDataset
 from evaluate import Evaluator
 
 from torchvision import transforms
-from utils import ASTNodeEncoder, get_vocab_mapping
-from utils import augment_edge, encode_y_to_arr, decode_arr_to_seq
+from utils import ASTNodeEncoder, get_vocab_mapping,one_hot_enc
+from utils import augment_edge, encode_y_to_arr, decode_arr_to_seq,encode_one_hot_y
 
 
 def load_args():
@@ -34,7 +34,7 @@ def load_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--seed', type=int, default=0,
                         help='random seed')
-    parser.add_argument('--dataset', type=str, default="ogbg-code2-nano",
+    parser.add_argument('--dataset', type=str, default="ogbg-code2-nano-clsf",
                         help='name of dataset')
     parser.add_argument('--num-heads', type=int, default=4, help="number of heads")
     parser.add_argument('--num-layers', type=int, default=4, help="number of layers")
@@ -45,7 +45,7 @@ def load_args():
     parser.add_argument('--lr', type=float, default=0.0001,
                         help='initial learning rate')
     parser.add_argument('--weight-decay', type=float, default=1e-6, help='weight decay')
-    parser.add_argument('--batch-size', type=int, default=32,
+    parser.add_argument('--batch-size', type=int, default=1,
                         help='batch size')
     parser.add_argument('--abs-pe', type=str, default=None, choices=POSENCODINGS.keys(),
                         help='which absolute PE to use?')
@@ -54,7 +54,7 @@ def load_args():
                         help='output path')
     parser.add_argument('--warmup', type=int, default=2, help="number of epochs for warmup")
     parser.add_argument('--layer-norm', action='store_true',default=False, help='use layer norm instead of batch norm')
-    parser.add_argument('--use-edge-attr', action='store_true',default=False ,help='use edge features')
+    parser.add_argument('--use-edge-attr', action='store_true',default=True ,help='use edge features')
     parser.add_argument('--edge-dim', type=int, default=128, help='edge features hidden dim')
     parser.add_argument('--gnn-type', type=str, default='gcn',
                         choices=GNN_TYPES,
@@ -66,7 +66,7 @@ def load_args():
     parser.add_argument('--se', type=str, default="gnn", 
             help='Extractor type: khopgnn, or gnn')
 
-    parser.add_argument('--max_seq_len', type=int, default=5,
+    parser.add_argument('--max_seq_len', type=int, default=None,
                         help='maximum sequence length to predict')
     parser.add_argument('--num_vocab', type=int, default=2,
                         help='the number of vocabulary used for sequence prediction')
@@ -130,7 +130,7 @@ def load_args():
     return args
 
 
-def train_epoch(model, loader, criterion, optimizer, lr_scheduler, epoch, use_cuda=False):
+def train_epoch(model, loader, criterion, optimizer, lr_scheduler, epoch,y_seq=True, use_cuda=False):
     model.train()
 
     running_loss = 0.0
@@ -153,14 +153,17 @@ def train_epoch(model, loader, criterion, optimizer, lr_scheduler, epoch, use_cu
             data = data.cuda()
 
         optimizer.zero_grad()
-        pred_list = model(data)
+        output = model(data)
 
-        loss = 0
-        for i in range(len(pred_list)):
-            loss += criterion(pred_list[i].to(torch.float32), data.y_arr[:,i])
+        if y_seq:
+            loss = 0
+            for i in range(len(output)): #batch
+                loss += criterion(output[i].to(torch.float32), data.y_arr[:,i])
 
-        loss = loss / len(pred_list)
-
+            loss = loss / len(output)
+        else:
+            loss = criterion(output, data.y_enc.squeeze())
+        
         loss.backward()
         optimizer.step()
 
@@ -224,32 +227,43 @@ def main():
     np.random.seed(args.seed)
     print(args)
     data_path = '../datasets'
-    num_edge_features = 2   #13
+    # num_edge_features = 2   #
 
     dataset = PygGraphPropPredDataset(name=args.dataset, root=data_path)
-    seq_len_list = np.array([len(seq) for seq in dataset.data.y])   #len tokens
-    print('Target seqence less or equal to {} is {}%.'.format(
-        args.max_seq_len,
-        np.sum(seq_len_list <= args.max_seq_len) / len(seq_len_list))
-    )
+    if args.max_seq_len:
+        seq_len_list = np.array([len(seq) for seq in dataset.data.y])   #len tokens
+        print('Target seqence less or equal to {} is {}%.'.format(
+            args.max_seq_len,
+            np.sum(seq_len_list <= args.max_seq_len) / len(seq_len_list))
+        )
 
     split_idx = dataset.get_idx_split() # ogb pyg train/test split
 
 
     ### building vocabulary for sequence predition. Only use training data.  aka token id
-    vocab2idx, idx2vocab = get_vocab_mapping([dataset.data.y[i] for i in split_idx['train']], args.num_vocab)
-
+    # vocab2idx, idx2vocab = get_vocab_mapping([dataset.data.y[i] for i in split_idx['train']], args.num_vocab)
+    seq2onehot=one_hot_enc(torch.tensor(range(dataset.num_classes),torch.long))
     ### set the transform function
     # augment_edge: add next-token edge as well as inverse edges. add edge attributes.
     # encode_y_to_arr: add y_arr to PyG data object, indicating the array representation of a sequence.
     dataset.transform = transforms.Compose([
-        augment_edge, lambda data: encode_y_to_arr(data, vocab2idx, args.max_seq_len)
+        # augment_edge, # 添加edge: inverse & next token(need dfs & is attred) & edge type
+        # lambda data: encode_y_to_arr(data, vocab2idx, args.max_seq_len), # encode y token to arr
+        lambda data: encode_one_hot_y(data,seq2onehot)
     ])
+    # arr_to_seq = lambda arr: decode_arr_to_seq(arr, idx2vocab)
 
     nodetypes_mapping = pd.read_csv(os.path.join(dataset.root, 'mapping', 'typeidx2type.csv'))
     nodeattributes_mapping = pd.read_csv(os.path.join(dataset.root, 'mapping', 'attridx2attr.csv'))
 
     print(nodeattributes_mapping)
+    # node类型type/attr/depth映射embb(三者之和) to dim_hidden, node_depth可视为对type的加强
+    node_encoder = ASTNodeEncoder(
+        args.dim_hidden,
+        num_nodetypes = len(nodetypes_mapping['type']),
+        num_nodeattributes = len(nodeattributes_mapping['attr']),
+        max_depth = 20
+    )
 
     filter_mask = np.array([dataset[i].num_nodes for i in split_idx['train']]) <= 1000
     train_dset = GraphDataset(dataset[split_idx['train'][filter_mask]], degree=True,
@@ -283,15 +297,9 @@ def main():
         deg = None
     print(deg)
 
-    node_encoder = ASTNodeEncoder(
-        args.dim_hidden,
-        num_nodetypes = len(nodetypes_mapping['type']),
-        num_nodeattributes = len(nodeattributes_mapping['attr']),
-        max_depth = 20
-    )
 
-    model = GraphTransformer(in_size=node_encoder,
-                             num_class=len(vocab2idx),
+    model = GraphTransformer(in_size=node_encoder if node_encoder else dataset.num_node_features,  #nn.model:直接使用;int:新建emb/linear
+                             num_class=dataset.num_classes if dataset.num_classes>0 else len(vocab2idx),
                              d_model=args.dim_hidden,
                              dim_feedforward=4*args.dim_hidden,
                              dropout=args.dropout,
@@ -303,19 +311,18 @@ def main():
                              gnn_type=args.gnn_type,
                              k_hop=args.k_hop,
                              use_edge_attr=args.use_edge_attr,
-                             num_edge_features=num_edge_features,
+                             num_edge_features=dataset.num_edge_features,
                              edge_dim=args.edge_dim,
                              se=args.se,
                              deg=deg,
                              in_embed=True,
-                             edge_embed=False,
+                             edge_embed=False,  #F:Linear/T:Embedding
                              max_seq_len=args.max_seq_len,
                              global_pool=args.global_pool)
     if args.use_cuda:
         model.cuda()
     print("Total number of parameters: {}".format(count_parameters(model)))
 
-    arr_to_seq = lambda arr: decode_arr_to_seq(arr, idx2vocab)
     evaluator = Evaluator(name=args.dataset,root=data_path)
 
     criterion = nn.CrossEntropyLoss()
@@ -348,9 +355,9 @@ def main():
     start_time = timer()
     for epoch in range(args.epochs):
         print("Epoch {}/{}, LR {:.6f}".format(epoch + 1, args.epochs, optimizer.param_groups[0]['lr']))
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, warmup_lr_scheduler, epoch, args.use_cuda)
-        val_score, val_loss = eval_epoch(model, val_loader, criterion, evaluator, arr_to_seq, args.use_cuda, split='Val')
-        test_score, test_loss = eval_epoch(model, test_loader, criterion, evaluator, arr_to_seq, args.use_cuda, split='Test')
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, warmup_lr_scheduler, epoch,False, args.use_cuda)
+        val_score, val_loss = eval_epoch(model, val_loader, criterion, evaluator, None, args.use_cuda, split='Val')
+        test_score, test_loss = eval_epoch(model, test_loader, criterion, evaluator, None, args.use_cuda, split='Test')
 
         if epoch >= args.warmup and lr_scheduler is not None:
             lr_scheduler.step()
